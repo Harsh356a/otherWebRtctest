@@ -467,3 +467,76 @@ const ScreenShareContainer = styled.div`
   transition: all 0.3s ease;
   overflow: hidden;
 `;
+
+const VideoBox = styled.div`
+  position: relative;
+  aspect-ratio: 16 / 9;
+  background-color: #3c3c3c;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+
+  ${props => props.isCurrentUser && `
+    border: 2px solid #4a90e2;
+  `}
+`;
+
+const MyVideo = styled.video`
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+`;
+
+const ScreenShareBox = styled.div`
+  position: relative;
+  width: 100%;
+  height: 100%;
+`;
+
+const ScreenShareVideo = styled.video`
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background-color: #000;
+`;
+
+const UserName = styled.div`
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  color: white;
+  padding: 5px 10px;
+  background-color: rgba(0, 0, 0, 0.5);
+  border-radius: 4px;
+  font-size: 14px;
+`;
+
+const UserLabel = styled.div`
+  position: absolute;
+  bottom: 10px;
+  left: 10px;
+  color: white;
+  padding: 5px 10px;
+  background-color: rgba(0, 0, 0, 0.5);
+  border-radius: 4px;
+  font-size: 12px;
+`;
+
+const PresenterLabel = styled.div`
+  position: absolute;
+  top: 20px;
+  left: 20px;
+  color: white;
+  padding: 8px 16px;
+  background-color: rgba(74, 144, 226, 0.8);
+  border-radius: 20px;
+  font-size: 16px;
+  font-weight: bold;
+  z-index: 10;
+`;
+
+const ChatContainer = styled.div`
+  width: ${props => props.display ? "300px" : "0px"};
+  transition: width 0.3s ease;
+  overflow: hidden;
+`;
