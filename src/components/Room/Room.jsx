@@ -159,8 +159,20 @@ export const Room = ({ roomId }) => {
       initiator: true,
       trickle: false,
       stream,
+      config: {
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'turn:your-turn-server.com', username: 'username', credential: 'password' }
+        ]
+      }
     });
-
+    peer.on('connect', () => {
+      console.log('Peer connection established');
+    });
+    
+    peer.on('error', (err) => {
+      console.error('Peer connection error:', err);
+    });
     peer.on("signal", (signal) => {
       socket.emit("BE-call-user", {
         userToCall: userId,

@@ -6,11 +6,10 @@ const VideoCard = ({ peer, isScreenSharing }) => {
 
   useEffect(() => {
     peer.on('stream', (stream) => {
-      if (ref.current) {
-        ref.current.srcObject = stream;
-      }
+      console.log('Received remote stream');
+      ref.current.srcObject = stream;
     });
-
+  
     return () => peer.off('stream');
   }, [peer]);
 
