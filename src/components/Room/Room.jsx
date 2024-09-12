@@ -291,8 +291,10 @@ export const Room = ({ roomId }) => {
     }
   
     if (!screenShare) {
-      navigator.mediaDevices.getDisplayMedia({ video: true, audio: true })
-        .then(stream => {
+      navigator.mediaDevices.getDisplayMedia({ video: { displaySurface: 'window' } })
+      .catch(() => navigator.mediaDevices.getDisplayMedia({ video: true }))
+
+      .then(stream => {
           const screenTrack = stream.getVideoTracks()[0];
   
           peersRef.current.forEach(({ peer }) => {
