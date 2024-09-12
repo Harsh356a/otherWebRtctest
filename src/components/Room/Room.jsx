@@ -23,11 +23,7 @@ export const Room = ({ roomId }) => {
   const userVideoRef = useRef();
   const screenShareRef = useRef();
   const userStream = useRef();
-  useEffect(() => {
-    if (screenShareStream && screenShareRef.current) {
-      screenShareRef.current.srcObject = screenShareStream;
-    }
-  }, [screenShareStream]);
+
   useEffect(() => {
     // Get Video Devices
     navigator.mediaDevices.enumerateDevices().then((devices) => {
@@ -47,17 +43,6 @@ export const Room = ({ roomId }) => {
 
         socket.emit("BE-join-room", { roomId, userName: currentUser });
         socket.on("FE-user-join", (users) => {
-          const screenSharer = users.find(user => user.info.isScreenSharing);
-          if (screenSharer) {
-            setScreenShareUser(screenSharer.info.userName);
-          }
-          socket.on("FE-screen-share-started", ({ userName }) => {
-            setScreenShareUser(userName);
-          });
-      
-          socket.on("FE-screen-share-stopped", () => {
-            setScreenShareUser(null);
-          });
           // all users
           const peers = [];
           users.forEach(({ userId, info }) => {
@@ -87,10 +72,7 @@ export const Room = ({ roomId }) => {
 
           setPeers(peers);
         });
-        if (screenShare && screenShareStream) {
-          const screenTrack = screenShareStream.getTracks()[0];
-          peer.addTrack(screenTrack, screenShareStream);
-        }
+
         socket.on("FE-receive-call", ({ signal, from, info }) => {
           let { userName, video, audio } = info;
           const peerIdx = findPeer(from);
@@ -157,25 +139,19 @@ export const Room = ({ roomId }) => {
     };
   }, [roomId, currentUser]);
 
+  useEffect(() => {
+    if (screenShareStream && screenShareRef.current) {
+      screenShareRef.current.srcObject = screenShareStream;
+    }
+  }, [screenShareStream]);
+
   function createPeer(userId, caller, stream) {
     const peer = new Peer({
       initiator: true,
       trickle: false,
       stream,
-      config: {
-        iceServers: [
-          { urls: 'stun:stun.l.google.com:19302' },
-          { urls: 'turn:your-turn-server.com', username: 'username', credential: 'password' }
-        ]
-      }
     });
-    peer.on('connect', () => {
-      console.log('Peer connection established');
-    });
-    
-    peer.on('error', (err) => {
-      console.error('Peer connection error:', err);
-    });
+
     peer.on("signal", (signal) => {
       socket.emit("BE-call-user", {
         userToCall: userId,
@@ -183,6 +159,7 @@ export const Room = ({ roomId }) => {
         signal,
       });
     });
+
     peer.on("disconnect", () => {
       peer.destroy();
     });
@@ -274,71 +251,82 @@ export const Room = ({ roomId }) => {
 
     socket.emit("BE-toggle-camera-audio", { roomId, switchTarget: target });
   };
-  const replaceTrackForPeer = (peer, screenTrack) => {
-    const sender = peer.getSenders().find(s => s.track.kind === 'video');
-    if (sender) {
-      sender.replaceTrack(screenTrack)
-        .then(() => console.log("Track replaced for peer:", peer.id))
-        .catch(err => console.error("Error replacing track:", err));
-    } else {
-      console.error("No video sender found for peer:", peer.id);
-    }
-  };
+
   const clickScreenSharing = () => {
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
+    if (!navigator.mediaDevices?.getDisplayMedia) {
       alert("Your browser doesn't support screen sharing");
       return;
     }
-  
-    if (!screenShare) {
-      navigator.mediaDevices.getDisplayMedia({ video: { displaySurface: 'window' } })
-      .catch(() => navigator.mediaDevices.getDisplayMedia({ video: true }))
 
-      .then(stream => {
-          const screenTrack = stream.getVideoTracks()[0];
-  
+    if (!screenShare) {
+      navigator.mediaDevices.getDisplayMedia({ video: true })
+        .then(stream => {
+          const screenTrack = stream.getTracks()[0];
+
           peersRef.current.forEach(({ peer }) => {
-            replaceTrackForPeer(peer, screenTrack);
+            // replaceTrack (oldTrack, newTrack, oldStream);
+            peer.replaceTrack(
+              peer.streams[0]
+                .getTracks()
+                .find(track => track.kind === 'video'),
+              screenTrack,
+              userStream.current
+            );
           });
-  
-          setScreenShareStream(stream);
+
+          // Listen click end
+          screenTrack.onended = () => {
+            peersRef.current.forEach(({ peer }) => {
+              peer.replaceTrack(
+                screenTrack,
+                peer.streams[0]
+                  .getTracks()
+                  .find(track => track.kind === 'video'),
+                userStream.current
+              );
+            });
+            userVideoRef.current.srcObject = userStream.current;
+            setScreenShare(false);
+          };
+
+          userVideoRef.current.srcObject = stream;
+          screenTrack.onended = () => {
+            userVideoRef.current.srcObject = userStream.current;
+            setScreenShare(false);
+          };
+
           setScreenShare(true);
+          setScreenShareStream(stream);
           setScreenShareUser(currentUser);
-  
           socket.emit("BE-screen-share-started", { roomId, userName: currentUser });
-  
-          screenTrack.onended = stopScreenShare;
         })
         .catch(error => {
-          console.error("Screen sharing error:", error);
-          if (error.name === "NotAllowedError") {
-            alert("Permission denied. Please grant screen sharing permission and try again.");
-          } else if (error.name === "NotReadableError") {
-            alert("Could not start screen sharing. If you're using a virtual machine, try disabling hardware acceleration.");
-          } else {
-            alert(`Failed to start screen sharing: ${error.message}`);
-          }
+          console.error("Error accessing screen share:", error);
+          alert(`Failed to start screen sharing: ${error.message}`);
         });
     } else {
       stopScreenShare();
     }
   };
+
   const stopScreenShare = () => {
     if (!screenShareStream) return;
-  
-    screenShareStream.getTracks().forEach((track) => track.stop());
-  
-    // Revert to camera video for all peers
+    
+    const tracks = screenShareStream.getTracks();
+    tracks.forEach(track => track.stop());
+
     peersRef.current.forEach(({ peer }) => {
-      const cameraTrack = userStream.current.getVideoTracks()[0];
-      replaceTrackForPeer(peer, cameraTrack);
+      peer.replaceTrack(
+        peer.streams[0].getTracks().find(track => track.kind === 'video'),
+        userStream.current.getTracks().find(track => track.kind === 'video'),
+        userStream.current
+      );
     });
-  
+
+    userVideoRef.current.srcObject = userStream.current;
     setScreenShare(false);
     setScreenShareStream(null);
     setScreenShareUser(null);
-  
-    // Notify other users about stopping screen share
     socket.emit("BE-screen-share-stopped", { roomId, userName: currentUser });
   };
 
@@ -371,6 +359,7 @@ export const Room = ({ roomId }) => {
           userStream.current.addTrack(newStreamTrack);
 
           peersRef.current.forEach(({ peer }) => {
+            // replaceTrack (oldTrack, newTrack, oldStream);
             peer.replaceTrack(
               oldStreamTrack,
               newStreamTrack,
@@ -383,171 +372,98 @@ export const Room = ({ roomId }) => {
 
   return (
     <RoomContainer>
-    <MainContent>
-      <VideoArea>
-        <ParticipantsContainer isScreenSharing={!!screenShareUser}>
-          <ParticipantGrid>
-            <VideoBox isCurrentUser>
-              {userVideoAudio["localUser"].video ? null : (
-                <UserName>{currentUser}</UserName>
-              )}
-              <MyVideo ref={userVideoRef} muted autoPlay playsInline />
-              <UserLabel>{currentUser} (You)</UserLabel>
-            </VideoBox>
-            {peers.map((peer, index, arr) => createUserVideo(peer, index, arr))}
-          </ParticipantGrid>
-        </ParticipantsContainer>
-        <ScreenShareContainer isScreenSharing={!!screenShareUser}>
-          {screenShareUser && (
-            <ScreenShareBox>
-              <PresenterLabel>{screenShareUser} is presenting</PresenterLabel>
-              {screenShareUser === currentUser ? (
-                <ScreenShareVideo
-                  ref={screenShareRef}
-                  autoPlay
-                  playsInline
-                />
-              ) : (
-                <VideoCard
-                  peer={peersRef.current.find(p => p.userName === screenShareUser)?.peer}
-                  isScreenSharing={true}
-                />
-              )}
-            </ScreenShareBox>
-          )}
-        </ScreenShareContainer>
-      </VideoArea>
-      <BottomBar
-        clickScreenSharing={clickScreenSharing}
-        clickChat={clickChat}
-        clickCameraDevice={clickCameraDevice}
-        goToBack={goToBack}
-        toggleCameraAudio={toggleCameraAudio}
-        userVideoAudio={userVideoAudio["localUser"]}
-        screenShare={screenShare}
-        videoDevices={videoDevices}
-        showVideoDevices={showVideoDevices}
-        setShowVideoDevices={setShowVideoDevices}
-      />
-    </MainContent>
-    <ChatContainer display={displayChat}>
-      <Chat display={displayChat} roomId={roomId} />
-    </ChatContainer>
-  </RoomContainer>
-);
+      <MainContent>
+        <VideoArea>
+          <ParticipantsContainer isScreenSharing={!!screenShareUser}>
+            <ParticipantGrid>
+              <VideoBox isCurrentUser>
+                {userVideoAudio["localUser"].video ? null : (
+                  <UserName>{currentUser}</UserName>
+                )}
+                <MyVideo ref={userVideoRef} muted autoPlay playsInline />
+                <UserLabel>{currentUser} (You)</UserLabel>
+              </VideoBox>
+              {peers.map((peer, index, arr) => createUserVideo(peer, index, arr))}
+            </ParticipantGrid>
+          </ParticipantsContainer>
+          <ScreenShareContainer isScreenSharing={!!screenShareUser}>
+            {screenShareUser && (
+              <ScreenShareBox>
+                <PresenterLabel>{screenShareUser} is presenting</PresenterLabel>
+                {screenShareUser === currentUser ? (
+                  <ScreenShareVideo
+                    ref={screenShareRef}
+                    autoPlay
+                    playsInline
+                  />
+                ) : (
+                  <VideoCard
+                    peer={peersRef.current.find(p => p.userName === screenShareUser)?.peer}
+                    isScreenSharing={true}
+                  />
+                )}
+              </ScreenShareBox>
+            )}
+          </ScreenShareContainer>
+        </VideoArea>
+        <BottomBar
+          clickScreenSharing={clickScreenSharing}
+          clickChat={clickChat}
+          clickCameraDevice={clickCameraDevice}
+          goToBack={goToBack}
+          toggleCameraAudio={toggleCameraAudio}
+          userVideoAudio={userVideoAudio["localUser"]}
+          screenShare={screenShare}
+          videoDevices={videoDevices}
+          showVideoDevices={showVideoDevices}
+          setShowVideoDevices={setShowVideoDevices}
+        />
+      </MainContent>
+      <ChatContainer display={displayChat}>
+        <Chat display={displayChat} roomId={roomId} />
+      </ChatContainer>
+    </RoomContainer>
+  );
 };
 
 const RoomContainer = styled.div`
-display: flex;
-width: 100%;
-height: 100vh;
-background-color: #1a1a1a;
+  display: flex;
+  width: 100%;
+  height: 100vh;
+  background-color: #1a1a1a;
 `;
 
 const MainContent = styled.div`
-flex: 1;
-display: flex;
-flex-direction: column;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
 `;
 
 const VideoArea = styled.div`
-flex: 1;
-display: flex;
-overflow: hidden;
+  flex: 1;
+  display: flex;
+  overflow: hidden;
 `;
 
 const ParticipantsContainer = styled.div`
-flex: ${props => props.isScreenSharing ? "0 0 20%" : "1 0 100%"};
-height: 100%;
-background-color: #2c2c2c;
-transition: all 0.3s ease;
-overflow-y: auto;
+  flex: ${props => props.isScreenSharing ? "0 0 20%" : "1 0 100%"};
+  height: 100%;
+  background-color: #2c2c2c;
+  transition: all 0.3s ease;
+  overflow-y: auto;
 `;
 
 const ParticipantGrid = styled.div`
-display: grid;
-grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-gap: 10px;
-padding: 10px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 10px;
+  padding: 10px;
 `;
 
 const ScreenShareContainer = styled.div`
-flex: ${props => props.isScreenSharing ? "1 0 80%" : "0 0 0%"};
-height: 100%;
-background-color: #1a1a1a;
-transition: all 0.3s ease;
-overflow: hidden;
-`;
-
-const VideoBox = styled.div`
-position: relative;
-aspect-ratio: 16 / 9;
-background-color: #3c3c3c;
-border-radius: 8px;
-overflow: hidden;
-box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-
-${props => props.isCurrentUser && `
-  border: 2px solid #4a90e2;
-`}
-`;
-
-const MyVideo = styled.video`
-width: 100%;
-height: 100%;
-object-fit: cover;
-`;
-
-const ScreenShareBox = styled.div`
-position: relative;
-width: 100%;
-height: 100%;
-`;
-
-const ScreenShareVideo = styled.video`
-width: 100%;
-height: 100%;
-object-fit: contain;
-background-color: #000;
-`;
-
-const UserName = styled.div`
-position: absolute;
-top: 10px;
-left: 10px;
-color: white;
-padding: 5px 10px;
-background-color: rgba(0, 0, 0, 0.5);
-border-radius: 4px;
-font-size: 14px;
-`;
-
-const UserLabel = styled.div`
-position: absolute;
-bottom: 10px;
-left: 10px;
-color: white;
-padding: 5px 10px;
-background-color: rgba(0, 0, 0, 0.5);
-border-radius: 4px;
-font-size: 12px;
-`;
-
-const PresenterLabel = styled.div`
-position: absolute;
-top: 20px;
-left: 20px;
-color: white;
-padding: 8px 16px;
-background-color: rgba(74, 144, 226, 0.8);
-border-radius: 20px;
-font-size: 16px;
-font-weight: bold;
-z-index: 10;
-`;
-
-const ChatContainer = styled.div`
-width: ${props => props.display ? "300px" : "0px"};
-transition: width 0.3s ease;
-overflow: hidden;
+  flex: ${props => props.isScreenSharing ? "1 0 80%" : "0 0 0%"};
+  height: 100%;
+  background-color: #1a1a1a;
+  transition: all 0.3s ease;
+  overflow: hidden;
 `;
