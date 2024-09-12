@@ -1,7 +1,7 @@
 import io from 'socket.io-client';
 
-const ENDPOINT = 'http://localhost:3001/';
-// const ENDPOINT = 'https://serverzoom-mpbv.onrender.com/'; // Uncomment this line for production
+// const ENDPOINT = 'http://localhost:3001/';
+const ENDPOINT = 'https://serverzoom-mpbv.onrender.com/'; // Uncomment this line for production
 
 const socket = io(ENDPOINT, {
   autoConnect: true,
