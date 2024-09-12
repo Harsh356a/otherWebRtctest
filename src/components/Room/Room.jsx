@@ -285,12 +285,16 @@ export const Room = ({ roomId }) => {
     }
   };
   const clickScreenSharing = () => {
-    if (!screenShare) {
-      navigator.mediaDevices.getDisplayMedia({ cursor: true })
-        .then((stream) => {
-          const screenTrack = stream.getTracks()[0];
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
+      alert("Your browser doesn't support screen sharing");
+      return;
+    }
   
-          // Replace track for all existing peers
+    if (!screenShare) {
+      navigator.mediaDevices.getDisplayMedia({ video: true, audio: true })
+        .then(stream => {
+          const screenTrack = stream.getVideoTracks()[0];
+  
           peersRef.current.forEach(({ peer }) => {
             replaceTrackForPeer(peer, screenTrack);
           });
@@ -299,16 +303,19 @@ export const Room = ({ roomId }) => {
           setScreenShare(true);
           setScreenShareUser(currentUser);
   
-          // Notify other users about screen sharing
           socket.emit("BE-screen-share-started", { roomId, userName: currentUser });
   
-          screenTrack.onended = () => {
-            stopScreenShare();
-          };
+          screenTrack.onended = stopScreenShare;
         })
-        .catch((err) => {
-          console.error("Error starting screen share:", err);
-          alert("Failed to start screen sharing. Please check your permissions and try again.");
+        .catch(error => {
+          console.error("Screen sharing error:", error);
+          if (error.name === "NotAllowedError") {
+            alert("Permission denied. Please grant screen sharing permission and try again.");
+          } else if (error.name === "NotReadableError") {
+            alert("Could not start screen sharing. If you're using a virtual machine, try disabling hardware acceleration.");
+          } else {
+            alert(`Failed to start screen sharing: ${error.message}`);
+          }
         });
     } else {
       stopScreenShare();
