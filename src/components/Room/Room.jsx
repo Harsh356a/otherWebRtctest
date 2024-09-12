@@ -87,7 +87,10 @@ export const Room = ({ roomId }) => {
 
           setPeers(peers);
         });
-
+        if (screenShare && screenShareStream) {
+          const screenTrack = screenShareStream.getTracks()[0];
+          peer.addTrack(screenTrack, screenShareStream);
+        }
         socket.on("FE-receive-call", ({ signal, from, info }) => {
           let { userName, video, audio } = info;
           const peerIdx = findPeer(from);
@@ -271,31 +274,41 @@ export const Room = ({ roomId }) => {
 
     socket.emit("BE-toggle-camera-audio", { roomId, switchTarget: target });
   };
-
+  const replaceTrackForPeer = (peer, screenTrack) => {
+    const sender = peer.getSenders().find(s => s.track.kind === 'video');
+    if (sender) {
+      sender.replaceTrack(screenTrack)
+        .then(() => console.log("Track replaced for peer:", peer.id))
+        .catch(err => console.error("Error replacing track:", err));
+    } else {
+      console.error("No video sender found for peer:", peer.id);
+    }
+  };
   const clickScreenSharing = () => {
     if (!screenShare) {
-      navigator.mediaDevices
-        .getDisplayMedia({ cursor: true })
+      navigator.mediaDevices.getDisplayMedia({ cursor: true })
         .then((stream) => {
           const screenTrack = stream.getTracks()[0];
-
+  
+          // Replace track for all existing peers
           peersRef.current.forEach(({ peer }) => {
-            const sender = peer.getSenders().find((s) => s.track.kind === 'video');
-            sender.replaceTrack(screenTrack);
+            replaceTrackForPeer(peer, screenTrack);
           });
-
+  
           setScreenShareStream(stream);
           setScreenShare(true);
           setScreenShareUser(currentUser);
-
+  
+          // Notify other users about screen sharing
+          socket.emit("BE-screen-share-started", { roomId, userName: currentUser });
+  
           screenTrack.onended = () => {
             stopScreenShare();
           };
-
-          socket.emit("BE-screen-share", { roomId, userName: currentUser });
         })
         .catch((err) => {
-          console.error("Error accessing screen share:", err);
+          console.error("Error starting screen share:", err);
+          alert("Failed to start screen sharing. Please check your permissions and try again.");
         });
     } else {
       stopScreenShare();
@@ -303,17 +316,21 @@ export const Room = ({ roomId }) => {
   };
   const stopScreenShare = () => {
     if (!screenShareStream) return;
+  
     screenShareStream.getTracks().forEach((track) => track.stop());
-
+  
+    // Revert to camera video for all peers
     peersRef.current.forEach(({ peer }) => {
-      const sender = peer.getSenders().find((s) => s.track.kind === 'video');
-      sender.replaceTrack(userStream.current.getVideoTracks()[0]);
+      const cameraTrack = userStream.current.getVideoTracks()[0];
+      replaceTrackForPeer(peer, cameraTrack);
     });
-
+  
     setScreenShare(false);
     setScreenShareStream(null);
     setScreenShareUser(null);
-    socket.emit("BE-stop-screen-share", { roomId, userName: currentUser });
+  
+    // Notify other users about stopping screen share
+    socket.emit("BE-screen-share-stopped", { roomId, userName: currentUser });
   };
 
   const expandScreen = (e) => {
